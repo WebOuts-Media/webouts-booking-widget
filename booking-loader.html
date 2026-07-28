@@ -1,7 +1,7 @@
 <!-- WebOuts Booking Widget — ONE-TIME paste into Bricks → Settings → Body (footer) scripts.
 
      REPLACES this tag:
-       <script src="https://cdn.jsdelivr.net/gh/TKsmalls/webouts-booking-widget@latest/widget.js"></script>
+       <script src="https://cdn.jsdelivr.net/gh/WebOuts-Media/webouts-booking-widget@latest/widget.js"></script>
 
      Why: jsDelivr serves @latest with "cache-control: max-age=604800", so a browser that has
      loaded the widget once keeps that copy for up to 7 DAYS. jsDelivr's edge updates instantly
@@ -17,7 +17,7 @@
      behaviour. After this paste, this tag never needs changing again. -->
 <script>
 (function () {
-  var repo = 'TKsmalls/webouts-booking-widget', file = 'widget.js';
+  var repo = 'WebOuts-Media/webouts-booking-widget', file = 'widget.js';
   function inject(ref) {
     var s = document.createElement('script');
     s.src = 'https://cdn.jsdelivr.net/gh/' + repo + '@' + ref + '/' + file;

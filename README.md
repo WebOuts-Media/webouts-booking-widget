@@ -10,7 +10,7 @@ Served via jsDelivr from this repo. On each client page (Bricks → Settings →
 **Body footer scripts**) add one line:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/TKsmalls/webouts-booking-widget@main/widget.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/WebOuts-Media/webouts-booking-widget@main/widget.js"></script>
 ```
 
 That replaces both the old inline **Custom CSS** block and the **Body-footer JS**
@@ -30,7 +30,7 @@ So one `widget.js` serves every client; onboarding a client is just the page HTM
 
 1. Edit `widget.js`, commit, push.
 2. Purge the CDN cache so it goes live immediately:
-   `curl https://purge.jsdelivr.net/gh/TKsmalls/webouts-booking-widget@main/widget.js`
+   `curl https://purge.jsdelivr.net/gh/WebOuts-Media/webouts-booking-widget@main/widget.js`
 
 Pin to a commit or tag if you ever need to freeze a version.
 
