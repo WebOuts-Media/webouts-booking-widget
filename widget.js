@@ -24,6 +24,16 @@
     var CAL_1_BI_URL = cal1BiEl ? cal1BiEl.value : '';
     var CAL_2_URL = cal2El ? cal2El.value : '';
 
+    // These pages were cloned from /orlando and their hidden filming inputs
+    // still carry ORLANDO's Calendly links (checked live 2026-10-14). Trusting
+    // them on a config failure would book the provider into the wrong studio,
+    // so drop them: config failure on these pages locks instead (same as an
+    // auto-created page). The interview link is shared by every OH page, so
+    // it stays.
+    var WRONG_HIDDEN_FILMING = { bayfront: 1, melbourne: 1, sebastianriver: 1 };
+    var hiddenSlug = (location.pathname || '').replace(/^\/+|\/+$/g, '').split('/').pop().toLowerCase();
+    if (WRONG_HIDDEN_FILMING[hiddenSlug]) { CAL_1_URL = ''; CAL_1_BI_URL = ''; }
+
     // Availability proxies (n8n). Filming: valid studio times swept across the
     // full booking horizon (respecting the 21-day notice). Scripting: only
     // times at least 10 days before the chosen filming date. Both brand-agnostic.
@@ -791,6 +801,10 @@
               setTimeout(o.onSlotTaken, 1200);
               return;
             }
+            // Calendly outage gate: nothing was booked. Show the lock screen
+            // (it re-checks every minute) instead of Calendly's own form,
+            // which would book through the outage the gate exists to avoid.
+            if (res && res.locked) { calLocked = true; applyLock(); return; }
             // Hard failure: fall back to Calendly's own form so booking is
             // never blocked.
             confirmSlotIntoCalendly(hostId, o.slot.scheduling_url, o.backFn);
@@ -1205,7 +1219,11 @@
             renderFetchFailed('wo-cal-2', retryInterviewLoad);
             return;
           }
-          if (!data || data.ok !== true || !data.event_type_uri) { degradeToSequential(); return; }
+          if (!data || data.ok !== true) { degradeToSequential(); return; }
+          // No slots before the cutoff: the proxy omits event_type_uri here,
+          // and the no-interview-slots screen below doesn't need it. Only a
+          // response WITH slots but without a uri is unusable.
+          if ((data.slots || []).length && !data.event_type_uri) { degradeToSequential(); return; }
           scriptingMeta = { event_type_uri: data.event_type_uri || '', custom_questions: data.custom_questions || [] };
           scriptingSlots = data.slots || [];
           scriptingSlotsForStart = startForSlots;
@@ -1474,6 +1492,20 @@
                     loadScriptingStep(lastFilmingEventUri);
                     return;
                   }
+                  if (res2 && res2.locked) {
+                    // Filming booked; Calendly outage gate refused the
+                    // interview. Keep the filming, ask them to retry the
+                    // interview instead of opening Calendly's own form.
+                    bookingInProgress = false;
+                    selectedScripting = null;
+                    chosenScriptingTime = null;
+                    pendingScriptingNotice = 'Your filming session is safely booked. We couldn’t book your interview just now. Please pick your interview time again in a minute.';
+                    show('wo-step-2-splash');
+                    restartLoadbar('wo-step-2-splash');
+                    scrollToWizard();
+                    loadScriptingStep(lastFilmingEventUri);
+                    return;
+                  }
                   scriptingHardFallback();
                 }, scriptingHardFallback);
               return;
@@ -1493,6 +1525,14 @@
                 scrollToWizard();
                 loadFilmingStep();
               }, 1200);
+              return;
+            }
+            if (res && res.locked) {
+              // Calendly outage gate: nothing booked. Lock screen, not Calendly.
+              bookingInProgress = false;
+              unloadGuardOn = false;
+              calLocked = true;
+              applyLock();
               return;
             }
             filmingHardFallback();

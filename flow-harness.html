@@ -1,0 +1,69 @@
+<!doctype html><meta charset="utf-8"><title>flow harness</title>
+<!-- Drives the combined wizard end to end with every network call stubbed.
+     Flags: locked=filming|scripting (create-booking answers the Calendly
+     outage gate), ivslots=none (no interview slots before the cutoff).
+     Run headless: chrome --headless=new --virtual-time-budget=30000 --dump-dom
+     http://localhost:PORT/flow-harness.html?locked=filming and read <pre id=RESULT>. --><body>
+<script>
+var Q=new URLSearchParams(location.search);
+window.__log=[];window.__calInit=0;
+window.Calendly={initInlineWidget:function(){window.__calInit++;window.__log.push('CALENDLY_IFRAME');}};
+function J(o){return Promise.resolve({ok:true,json:function(){return Promise.resolve(o)},text:function(){return Promise.resolve(JSON.stringify(o))}});}
+var day=new Date(Date.now()+35*864e5);day.setUTCHours(13,0,0,0);
+var f1=day.toISOString(), f2=new Date(day.getTime()+36e5).toISOString();
+var iv=new Date(day.getTime()-12*864e5).toISOString();
+window.fetch=function(url,opts){url=String(url);var body=(opts&&opts.body)||'';
+ if(url.indexOf('booking-config')>-1)return J({ok:true,filming:'https://calendly.com/x/f',bilingual:'',scripting:'https://calendly.com/x/s'});
+ if(url.indexOf('calendlystatus')>-1)return J({components:[]});
+ if(url.indexOf('wo-filming-availability')>-1)return J({ok:true,event_type_uri:'https://api.calendly.com/event_types/F',custom_questions:[],bookedOutMonths:[],slots:[{start_time:f1,scheduling_url:'https://calendly.com/x/f/1'},{start_time:f2,scheduling_url:'https://calendly.com/x/f/2'}]});
+ if(url.indexOf('wo-scripting-availability')>-1){window.__log.push('SCRIPTING_AVAIL');
+   if(Q.get('ivslots')==='none')return J({ok:true,slots:[],no_slots:true,min_days:7});
+   return J({ok:true,event_type_uri:'https://api.calendly.com/event_types/S',custom_questions:[],min_days:7,slots:[{start_time:iv,scheduling_url:'https://calendly.com/x/s/1'}]});}
+ if(url.indexOf('wo-create-booking')>-1){var kind=/kind=([a-z]+)/.exec(body)[1];window.__log.push('BOOK_'+kind);
+   var lk=Q.get('locked');
+   if(lk===kind)return J({ok:false,status:503,slot_taken:false,locked:true,reason:'calendly_unavailable'});
+   return J({ok:true,event_uri:'https://api.calendly.com/scheduled_events/'+kind,invitee_uri:'i',cancel_url:'https://calendly.com/c',reschedule_url:'https://calendly.com/r'});}
+ return J({ok:false});};
+function waitFor(sel,fn,n){n=n||0;var e=document.querySelector(sel);if(e&&e.offsetParent!==null||e&&n>5){fn(e);return;}if(n>200){window.__log.push('TIMEOUT '+sel);finish();return;}setTimeout(function(){waitFor(sel,fn,n+1)},100);}
+function vis(id){var e=document.getElementById(id);return !!e&&!e.classList.contains('hidden');}
+function finish(){var r=document.createElement('pre');r.id='RESULT';
+ r.textContent=JSON.stringify({log:window.__log,calendlyIframes:window.__calInit,lock:vis('wo-locked'),allDone:vis('wo-all-done'),
+  earlierInterviewScreen:/needs an earlier interview/.test(document.body.innerText),
+  notice:(document.querySelector('.wo-slot-notice')||{}).textContent||''});document.body.appendChild(r);}
+window.addEventListener('load',function(){setTimeout(function(){
+ document.getElementById('wo_first_name').value='Test';document.getElementById('wo_last_name').value='Provider';
+ document.getElementById('wo_email').value='esmoll@webouts.com';document.getElementById('wo_phone').value='4075550142';
+ document.getElementById('wo-continue').click();
+ waitFor('#wo-cal-1 .wo-slot-btn',function(b){b.click();
+  if(Q.get('ivslots')==='none'){setTimeout(finish,4000);return;}
+  waitFor('#wo-cal-2 .wo-slot-btn',function(b2){b2.click();
+   waitFor('.wo-confirm-btn',function(c){c.click();setTimeout(finish,5000);});});});
+},3000);});
+</script>
+<div id="wo-booking" class="wo-booking">
+  <div class="wo-banner">banner</div>
+  <div class="wo-stage">
+    <div class="wo-step" id="wo-step-0">
+      <div class="wo-step-header">Book</div>
+      <input type="text" id="wo_first_name"><input type="text" id="wo_last_name">
+      <input type="email" id="wo_email">
+      <select id="wo_country"><option value="+1">+1</option></select>
+      <input type="tel" id="wo_phone">
+      <div class="wo-field" id="wo-language-field">
+        <div class="wo-language-row">
+          <input type="radio" name="wo_language" value="english" id="l1" checked><label class="wo-lang-card" for="l1">EN</label>
+          <input type="radio" name="wo_language" value="bilingual" id="l2"><label class="wo-lang-card" for="l2">EN+ES</label>
+        </div>
+      </div>
+      <div class="wo-error" id="wo-error"></div>
+      <div class="wo-actions"><button class="wo-btn" id="wo-continue">Continue</button></div>
+    </div>
+    <div class="wo-step hidden wo-splash" id="wo-step-1-splash"><h3>Step 1</h3></div>
+    <div class="wo-step hidden" id="wo-step-1"><div class="wo-cal-container" id="wo-cal-1"></div></div>
+    <div class="wo-step hidden wo-splash" id="wo-step-2-splash"><h3>Step 2</h3></div>
+    <div class="wo-step hidden" id="wo-step-2"><div class="wo-cal-container" id="wo-cal-2"></div></div>
+    <div class="wo-step hidden" id="wo-all-done">done</div>
+  </div>
+</div>
+
+<script src="./widget.js"></script></body>
