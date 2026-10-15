@@ -44,6 +44,34 @@
     var WEBHOOK_BOOKING = 'https://webouts.app.n8n.cloud/webhook/wo-create-booking';
     var WEBHOOK_CONFIG = 'https://webouts.app.n8n.cloud/webhook/booking-config';
 
+    // ENGINE MODE (2026-10-15): pages moved off Calendly to WebOuts Scheduling.
+    // On load the widget asks the engine whether this page has moved. Only a
+    // clear "provider: engine" switches the widget over; any other answer, an
+    // error or no answer within 4 s leaves everything below exactly as it was.
+    // Once on, it stays on for this page load, every Calendly fallback becomes
+    // the "Try again" screen, and both bookings go out as one request.
+    var ENGINE_API = window.WO_ENGINE_API || 'https://webouts-scheduling.esmoll.workers.dev/api/book';
+    var ENGINE_MODE = false;
+    function fetchEngineConfig() {
+      if (!window.fetch) return Promise.resolve(null);
+      var timeout = new Promise(function (resolve) { setTimeout(function () { resolve(null); }, 4000); });
+      var ask = fetch(ENGINE_API + '/compat/config?slug=' + encodeURIComponent(pageSlug))
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { return d && d.ok && d.provider === 'engine' && d.filming && d.scripting ? d : null; })
+        .catch(function () { return null; });
+      return Promise.race([ask, timeout]);
+    }
+    function useEngine(d) {
+      ENGINE_MODE = true;
+      CAL_1_URL = d.filming;
+      CAL_2_URL = d.scripting;
+      CAL_1_BI_URL = d.bilingual || '';
+      WEBHOOK_FILMING = ENGINE_API + '/compat/engine/filming-availability';
+      WEBHOOK_SCRIPTING = ENGINE_API + '/compat/engine/scripting-availability';
+      calLocked = false;
+      applyLangVisibility();
+    }
+
     var langField = document.getElementById('wo-language-field');
     // Bilingual is offered only when the client's English & Spanish filming
     // event is ACTIVE in Calendly, so this re-runs whenever CAL_1_BI_URL changes.
@@ -61,12 +89,11 @@
     // page that has no hidden inputs, locks the wizard (see “Wizard lock”).
     var pageSlug = (location.pathname || '').replace(/^\/+|\/+$/g, '').split('/').pop().toLowerCase();
 
-    function fetchConfig() {
-      if (!pageSlug) return Promise.resolve();
+    function fetchCalendlyConfig() {
       return fetch(WEBHOOK_CONFIG + '?slug=' + encodeURIComponent(pageSlug))
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
-          if (!d || !d.ok) return;
+          if (!d || !d.ok || ENGINE_MODE) return;
           CAL_1_URL = d.filming || CAL_1_URL;
           CAL_2_URL = d.scripting || CAL_2_URL;
           // Authoritative: '' means the bilingual event is off or absent.
@@ -74,6 +101,16 @@
           applyLangVisibility();
         })
         .catch(function () { /* keep the hidden-input fallback */ });
+    }
+
+    function fetchConfig() {
+      if (!pageSlug) return Promise.resolve();
+      if (ENGINE_MODE) return Promise.resolve();
+      // Both at once; the engine's answer wins when it says this page has moved.
+      var engine = fetchEngineConfig();
+      return Promise.all([engine, fetchCalendlyConfig()]).then(function (r) {
+        if (r[0]) useEngine(r[0]);
+      });
     }
 
     // Both links are required to complete a booking, and every fallback path in
@@ -298,7 +335,7 @@
 
     function pollLock() {
       return Promise.all([
-        fetchCalendlyStatus(),
+        ENGINE_MODE ? Promise.resolve(false) : fetchCalendlyStatus(),
         // Retry the config service only while it's the thing that's broken, so
         // a healthy page doesn't re-poll n8n every minute for no reason.
         configLocked ? fetchConfig() : Promise.resolve()
@@ -383,6 +420,7 @@
     var filmingMeta = null;        // { event_type_uri, custom_questions } from availability
     var scriptingMeta = null;
     var bookingLinks = { filming: null, scripting: null };
+    var engineIvNotice = null;   // engine mode: shown once above fresh interview times
     var lastFilmingEventUri = '';
     var selectedFilming = null;         // { start_time, scheduling_url } — chosen, NOT yet booked
     var selectedScripting = null;       // { start_time, scheduling_url } — chosen interview time
@@ -494,6 +532,7 @@
     // when the booking proxy is unreachable). Confirming fires
     // event_scheduled -> next step via the message listener below.
     function confirmSlotIntoCalendly(hostId, schedulingUrl, backFn) {
+      if (ENGINE_MODE) { renderFetchFailed(hostId, backFn); return; }
       if (!window.Calendly) {
         // Calendly's script never loaded: show the contact-Cam message
         // instead of stranding the user on a dead button.
@@ -1141,9 +1180,9 @@
     // is unreachable or errors).
     function initCal1() {
       if (cal1Loaded) return;
-      // Calendly's script never loaded, so there is no iframe to fall back to.
-      // Say so and offer a retry rather than returning to an empty box.
-      if (!window.Calendly) { renderFetchFailed('wo-cal-1', retryFilmingLoad); return; }
+      // Calendly's script never loaded (or this page is on the engine), so
+      // there is no iframe to fall back to. Offer a retry instead.
+      if (ENGINE_MODE || !window.Calendly) { renderFetchFailed('wo-cal-1', retryFilmingLoad); return; }
       var host = document.getElementById('wo-cal-1');
       host.innerHTML = '';
       var inner = document.createElement('div');
@@ -1188,6 +1227,8 @@
     }
 
     function degradeToSequential() {
+      // Engine pages have no two-step Calendly path: retry the interview times.
+      if (ENGINE_MODE) { show('wo-step-2'); renderFetchFailed('wo-cal-2', retryInterviewLoad); return; }
       pendingRestoreScripting = null;
       scriptingSlots = null;
       scriptingMeta = null;
@@ -1250,7 +1291,9 @@
             renderInterviewPicker('Your filming time changed, so your earlier interview pick no longer fits. Please choose a new one.');
             return;
           }
-          renderInterviewPicker(null);
+          var notice = engineIvNotice;
+          engineIvNotice = null;
+          renderInterviewPicker(notice);
         }, function () {
           if (settled) return; settled = true; clearTimeout(timer);
           degradeToSequential();
@@ -1410,9 +1453,12 @@
 
       var note = document.createElement('p');
       note.className = 'wo-confirm-note';
-      note.textContent = 'One click books both. You’ll get a confirmation email for each, with reschedule and cancel links.';
+      note.textContent = ENGINE_MODE
+        ? 'One click books both. We’ll email your confirmation with a link to make changes.'
+        : 'One click books both. You’ll get a confirmation email for each, with reschedule and cancel links.';
       card.appendChild(note);
 
+      var engineIdem = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
       btn.addEventListener('click', function () {
         err.textContent = '';
         var fCol = collectAnswers(filmingFields);
@@ -1436,6 +1482,82 @@
           b.disabled = true;
         });
         btn.textContent = 'Booking your filming session…';
+
+        // Engine pages: one all-or-nothing request for both. If either time
+        // was just taken nothing is booked, so the provider simply picks again.
+        if (ENGINE_MODE) {
+          btn.textContent = 'Booking your filming and interview…';
+          var reEnable = function (msg) {
+            bookingInProgress = false;
+            unloadGuardOn = false;
+            Array.prototype.forEach.call(host.querySelectorAll('button'), function (b) { b.disabled = false; });
+            btn.textContent = 'Confirm Both Bookings';
+            err.textContent = msg;
+          };
+          postForm(ENGINE_API + '/compat/engine/book',
+            'filming_key=' + encodeURIComponent(filmingMeta.event_type_uri) +
+            '&filming_start=' + encodeURIComponent(fSlot.start_time) +
+            '&interview_start=' + encodeURIComponent(sSlot.start_time) +
+            '&first_name=' + encodeURIComponent(doctorPrefill.firstName) +
+            '&last_name=' + encodeURIComponent(doctorPrefill.lastName) +
+            '&email=' + encodeURIComponent(doctorPrefill.email) +
+            '&timezone=' + encodeURIComponent(TIMEZONE) +
+            '&sms=' + encodeURIComponent(doctorPrefill.smsReminderNumber || '') +
+            '&guests=' + encodeURIComponent(JSON.stringify(savedGuests || [])) +
+            '&filming_answers=' + encodeURIComponent(JSON.stringify(fCol.answers)) +
+            '&interview_answers=' + encodeURIComponent(JSON.stringify(sCol.answers)) +
+            '&idem_key=' + encodeURIComponent(engineIdem))
+            .then(function (res) {
+              if (res && res.ok) {
+                filmingBooked = true;
+                bookingLinks.filming = res.filming;
+                bookingLinks.scripting = res.scripting;
+                lastFilmingEventUri = (res.filming && res.filming.event_uri) || '';
+                scriptingFilmingStart = fSlot.start_time;
+                chosenScriptingTime = sSlot.start_time;
+                bookingInProgress = false;
+                renderRecap();
+                show('wo-all-done');
+                scrollToWizard();
+                return;
+              }
+              if (res && res.slot_taken && res.part === 'interview') {
+                // Nothing booked. Fresh interview times for the same filming pick.
+                bookingInProgress = false;
+                unloadGuardOn = false;
+                selectedScripting = null;
+                chosenScriptingTime = null;
+                engineIvNotice = 'The interview time you picked was just taken. Here are the latest openings.';
+                show('wo-step-2-splash');
+                restartLoadbar('wo-step-2-splash');
+                scrollToWizard();
+                loadInterviewStep();
+                return;
+              }
+              if (res && res.slot_taken) {
+                err.textContent = 'Your filming time was just taken — refreshing the latest openings…';
+                setTimeout(function () {
+                  bookingInProgress = false;
+                  unloadGuardOn = false;
+                  selectedFilming = null;
+                  selectedScripting = null;
+                  chosenScriptingTime = null;
+                  filmingPrefetch = {};
+                  show('wo-step-1-splash');
+                  restartLoadbar('wo-step-1-splash');
+                  scrollToWizard();
+                  loadFilmingStep();
+                }, 1200);
+                return;
+              }
+              reEnable('We couldn’t finish your booking just now. Nothing was booked. Please try again in a moment.');
+            }, function () {
+              // Network failure: the request may or may not have landed. The
+              // same idem_key on a retry returns the original booking, never a second one.
+              reEnable('We couldn’t reach our scheduling system. Please try again in a moment.');
+            });
+          return;
+        }
 
         // Booking proxy hard-down before anything booked: Calendly's own form
         // for filming; the message listener then drives the classic step 2.
@@ -1702,7 +1824,7 @@
     // Fallback: the original, unconstrained script-interview calendar.
     function initCal2() {
       if (cal2Loaded) return;
-      if (!window.Calendly) {
+      if (ENGINE_MODE || !window.Calendly) {
         renderFetchFailed('wo-cal-2', function () {
           show('wo-step-2-splash');
           restartLoadbar('wo-step-2-splash');
