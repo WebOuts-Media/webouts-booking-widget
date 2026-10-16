@@ -54,13 +54,29 @@
     // (ClockUp-Web functions/api/book). The old workers.dev address still works.
     var ENGINE_API = window.WO_ENGINE_API || 'https://app.webouts.com/api/book';
     var ENGINE_MODE = false;
+    // One booking key per visit (engine mode). Dropped only after an answer that
+    // means nothing was booked; after a lost or unclear answer every retry, even
+    // with new times, reuses it, so the engine never makes a second booking.
+    var engineIdem = null, engineIdemUnsure = false;
+    // Pages on WebOuts Scheduling. Calendly is being shut down, so a moved page
+    // never falls back to it: when the engine can't be reached the page shows
+    // "Booking is busy" and checks again on its own. Add a slug here on its
+    // switch day (the engine's own answer still wins when it arrives).
+    var MOVED_PAGES = [].concat(window.WO_MOVED_PAGES || []);   // the window hook is for engine-harness.html
+    var engineBusy = false;
+    function isMovedPage() { return ENGINE_MODE || MOVED_PAGES.indexOf(pageSlug) !== -1; }
     function fetchEngineConfig() {
-      if (!window.fetch) return Promise.resolve(null);
-      var timeout = new Promise(function (resolve) { setTimeout(function () { resolve(null); }, 4000); });
+      if (!window.fetch) return Promise.resolve({ state: 'none' });
+      // { state: 'engine', d } | { state: 'calendly' } (the engine answered: not moved)
+      // | { state: 'none' } (no usable answer within 4 s).
+      var timeout = new Promise(function (resolve) { setTimeout(function () { resolve({ state: 'none' }); }, 4000); });
       var ask = fetch(ENGINE_API + '/compat/config?slug=' + encodeURIComponent(pageSlug))
         .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (d) { return d && d.ok && d.provider === 'engine' && d.filming && d.scripting ? d : null; })
-        .catch(function () { return null; });
+        .then(function (d) {
+          if (d && d.ok && d.provider === 'engine' && d.filming && d.scripting) return { state: 'engine', d: d };
+          return d && d.ok ? { state: 'calendly' } : { state: 'none' };
+        })
+        .catch(function () { return { state: 'none' }; });
       return Promise.race([ask, timeout]);
     }
     function useEngine(d) {
@@ -107,12 +123,22 @@
 
     function fetchConfig() {
       if (!pageSlug) return Promise.resolve();
-      if (ENGINE_MODE) return Promise.resolve();
-      // Both at once; the engine's answer wins when it says this page has moved.
-      var engine = fetchEngineConfig();
-      return Promise.all([engine, fetchCalendlyConfig()]).then(function (r) {
-        if (r[0]) useEngine(r[0]);
+      if (ENGINE_MODE && !engineBusy) return Promise.resolve();
+      // Both at once. The engine's answer wins, and never waits on n8n.
+      var cal = isMovedPage() ? null : Promise.race([fetchCalendlyConfig(), new Promise(function (resolve) { setTimeout(resolve, 6000); })]);
+      return fetchEngineConfig().then(function (e) {
+        if (e.state === 'engine') { engineBusy = false; useEngine(e.d); return; }
+        if (e.state === 'none' && isMovedPage()) { engineBusy = true; return; }
+        return cal || Promise.race([fetchCalendlyConfig(), new Promise(function (resolve) { setTimeout(resolve, 6000); })]);
       });
+    }
+
+    // A moved page whose engine went quiet mid-booking: pause with the busy
+    // screen (never the Calendly fallback) until the engine answers again.
+    function engineUnavailable() {
+      engineBusy = true;
+      bookingInProgress = false;
+      applyLock();
     }
 
     // Both links are required to complete a booking, and every fallback path in
@@ -261,11 +287,19 @@
     var calLocked = false;
     var configLocked = false;
 
-    function isLocked() { return calLocked || configLocked; }
+    function isLocked() { return calLocked || configLocked || engineBusy; }
 
     function applyLock() {
       if (isLocked()) {
         buildLockScreen();
+        var t = document.getElementById('wo-locked-title'), x = document.getElementById('wo-locked-text');
+        if (engineBusy) {
+          if (t) t.textContent = 'Booking is busy';
+          if (x) x.textContent = 'Our booking system is busy right now, so online booking is paused for a moment. This page checks again on its own every 20 seconds, or press Check again.';
+        } else if (t && x && x.getAttribute('data-orig')) {
+          t.textContent = 'Scheduling is paused for a moment';
+          x.innerHTML = x.getAttribute('data-orig');
+        }
         show('wo-locked');
         return;
       }
@@ -280,8 +314,8 @@
       el.id = 'wo-locked';
       el.innerHTML =
         '<div class="wo-slots-msg" style="padding:44px 24px;">' +
-        '<h3 style="text-align:center;">Scheduling is paused for a moment</h3>' +
-        '<p>Our scheduling provider is having a brief outage, so we’ve paused online booking to make sure your confirmation and calendar invite go out correctly. This page unlocks automatically as soon as it’s resolved — please check back shortly.</p>' +
+        '<h3 id="wo-locked-title" style="text-align:center;">Scheduling is paused for a moment</h3>' +
+        '<p id="wo-locked-text">Our scheduling provider is having a brief outage, so we’ve paused online booking to make sure your confirmation and calendar invite go out correctly. This page unlocks automatically as soon as it’s resolved — please check back shortly.</p>' +
         '<p class="wo-slots-contact" style="margin-top:14px;">Need us right away? Contact Cam Kubasta at' +
         '<br><a href="tel:+19202145227" style="white-space:nowrap;">(920) 214-5227</a>' +
         '<br><a href="mailto:ckubasta@webouts.com">ckubasta@webouts.com</a></p>' +
@@ -301,6 +335,8 @@
       st.setAttribute('aria-live', 'polite');
       st.style.cssText = 'text-align:center;margin-top:12px;color:#07378C;font-weight:600;';
       el.querySelector('.wo-slots-msg').appendChild(st);
+      var tx = el.querySelector('#wo-locked-text');
+      if (tx) tx.setAttribute('data-orig', tx.innerHTML);
       var stage = booking.querySelector('.wo-stage') || booking;
       stage.appendChild(el);
     }
@@ -316,7 +352,7 @@
       pollLock().then(function (locked) {
         if (btn) { btn.disabled = false; btn.textContent = 'Check again'; }
         if (locked && st) {
-          st.textContent = 'Still paused — we just checked. Please check back shortly.';
+          st.textContent = engineBusy ? 'Still busy. We just checked, and we will keep checking.' : 'Still paused — we just checked. Please check back shortly.';
           st.classList.remove('hidden');
         }
         // If it recovered, pollLock already switched to the booking form.
@@ -340,7 +376,7 @@
         ENGINE_MODE ? Promise.resolve(false) : fetchCalendlyStatus(),
         // Retry the config service only while it's the thing that's broken, so
         // a healthy page doesn't re-poll n8n every minute for no reason.
-        configLocked ? fetchConfig() : Promise.resolve()
+        (configLocked || engineBusy) ? fetchConfig() : Promise.resolve()
       ]).then(function (r) {
         calLocked = r[0];
         // Guard on configSettled: the first poll fires before the config lands,
@@ -1181,6 +1217,7 @@
     // Fallback: the original Calendly filming widget (used only if the proxy
     // is unreachable or errors).
     function initCal1() {
+      if (isMovedPage()) { engineUnavailable(); return; }
       if (cal1Loaded) return;
       // Calendly's script never loaded (or this page is on the engine), so
       // there is no iframe to fall back to. Offer a retry instead.
@@ -1229,6 +1266,7 @@
     }
 
     function degradeToSequential() {
+      if (isMovedPage()) { engineUnavailable(); return; }
       // Engine pages have no two-step Calendly path: retry the interview times.
       if (ENGINE_MODE) { show('wo-step-2'); renderFetchFailed('wo-cal-2', retryInterviewLoad); return; }
       pendingRestoreScripting = null;
@@ -1460,7 +1498,6 @@
         : 'One click books both. You’ll get a confirmation email for each, with reschedule and cancel links.';
       card.appendChild(note);
 
-      var engineIdem = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
       btn.addEventListener('click', function () {
         err.textContent = '';
         var fCol = collectAnswers(filmingFields);
@@ -1489,6 +1526,8 @@
         // was just taken nothing is booked, so the provider simply picks again.
         if (ENGINE_MODE) {
           btn.textContent = 'Booking your filming and interview…';
+          if (!engineIdem) engineIdem = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+          var settleIdem = function () { if (!engineIdemUnsure) engineIdem = null; };
           var reEnable = function (msg) {
             bookingInProgress = false;
             unloadGuardOn = false;
@@ -1523,6 +1562,16 @@
                 scrollToWizard();
                 return;
               }
+              if (res && res.error === 'duplicate_request') {
+                reEnable('It looks like your booking already went through. Check your email, including spam, for the confirmation. If nothing arrives in a few minutes, email filming@webouts.com.');
+                return;
+              }
+              if (!res || res.error === 'server_error') {
+                engineIdemUnsure = true;
+                reEnable('We couldn’t confirm your booking just now. Please try again in a moment.');
+                return;
+              }
+              settleIdem();
               if (res && res.slot_taken && res.part === 'interview') {
                 // Nothing booked. Fresh interview times for the same filming pick.
                 bookingInProgress = false;
@@ -1556,6 +1605,7 @@
             }, function () {
               // Network failure: the request may or may not have landed. The
               // same idem_key on a retry returns the original booking, never a second one.
+              engineIdemUnsure = true;
               reEnable('We couldn’t reach our scheduling system. Please try again in a moment.');
             });
           return;
@@ -1939,6 +1989,7 @@
     // down, then keep checking so it unlocks on its own the moment it returns.
     pollLock();
     setInterval(pollLock, 60000);
+    setInterval(function () { if (engineBusy) pollLock(); }, 20000);
 
     window.addEventListener('message', function (e) {
       if (!e.data || typeof e.data !== 'object') return;
