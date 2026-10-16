@@ -50,7 +50,9 @@
     // error or no answer within 4 s leaves everything below exactly as it was.
     // Once on, it stays on for this page load, every Calendly fallback becomes
     // the "Try again" screen, and both bookings go out as one request.
-    var ENGINE_API = window.WO_ENGINE_API || 'https://webouts-scheduling.esmoll.workers.dev/api/book';
+    // app.webouts.com/api/book is a WebOuts-address pass-through to the engine
+    // (ClockUp-Web functions/api/book). The old workers.dev address still works.
+    var ENGINE_API = window.WO_ENGINE_API || 'https://app.webouts.com/api/book';
     var ENGINE_MODE = false;
     function fetchEngineConfig() {
       if (!window.fetch) return Promise.resolve(null);
