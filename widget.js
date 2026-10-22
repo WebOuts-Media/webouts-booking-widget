@@ -1566,7 +1566,11 @@
                 reEnable('It looks like your booking already went through. Check your email, including spam, for the confirmation. If nothing arrives in a few minutes, email filming@webouts.com.');
                 return;
               }
-              if (!res || res.error === 'server_error') {
+              // Unsure cases keep the booking key: the engine may have committed
+              // before the answer was lost (its own 500, or the app.webouts.com
+              // proxy answering 502 engine_unreachable / engine_bad_response).
+              // The same idem_key on a retry returns that booking, never a second one.
+              if (!res || res.error === 'server_error' || res.error === 'engine_unreachable' || res.error === 'engine_bad_response') {
                 engineIdemUnsure = true;
                 reEnable('We couldn’t confirm your booking just now. Please try again in a moment.');
                 return;
