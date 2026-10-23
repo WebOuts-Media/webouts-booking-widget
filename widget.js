@@ -58,13 +58,13 @@
     // means nothing was booked; after a lost or unclear answer every retry, even
     // with new times, reuses it, so the engine never makes a second booking.
     var engineIdem = null, engineIdemUnsure = false;
-    // Pages on WebOuts Scheduling. Calendly is being shut down, so a moved page
-    // never falls back to it: when the engine can't be reached the page shows
-    // "Booking is busy" and checks again on its own. Add a slug here on its
-    // switch day (the engine's own answer still wins when it arrives).
-    var MOVED_PAGES = ['griffin', 'msk', 'northwell', 'bayfront', 'fmc', 'melbourne', 'orlando', 'sebastianriver'].concat(window.WO_MOVED_PAGES || []);   // the window hook is for engine-harness.html
+    // Every page is on WebOuts Scheduling (all four clients since 2026-10-22;
+    // Calendly is shut down for new bookings). A page never falls back to
+    // Calendly: when the engine can't be reached it shows "Booking is busy"
+    // and checks again on its own. A new client needs no edit here; the
+    // engine's /compat/config answer for its slug is the whole switch.
     var engineBusy = false;
-    function isMovedPage() { return ENGINE_MODE || MOVED_PAGES.indexOf(pageSlug) !== -1; }
+    function isMovedPage() { return true; }
     function fetchEngineConfig() {
       if (!window.fetch) return Promise.resolve({ state: 'none' });
       // { state: 'engine', d } | { state: 'calendly' } (the engine answered: not moved)
