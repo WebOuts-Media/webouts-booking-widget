@@ -62,7 +62,7 @@
     // never falls back to it: when the engine can't be reached the page shows
     // "Booking is busy" and checks again on its own. Add a slug here on its
     // switch day (the engine's own answer still wins when it arrives).
-    var MOVED_PAGES = ['griffin', 'msk'].concat(window.WO_MOVED_PAGES || []);   // the window hook is for engine-harness.html
+    var MOVED_PAGES = ['griffin', 'msk', 'northwell'].concat(window.WO_MOVED_PAGES || []);   // the window hook is for engine-harness.html
     var engineBusy = false;
     function isMovedPage() { return ENGINE_MODE || MOVED_PAGES.indexOf(pageSlug) !== -1; }
     function fetchEngineConfig() {
