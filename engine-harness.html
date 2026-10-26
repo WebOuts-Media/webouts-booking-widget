@@ -81,6 +81,7 @@ function finish(){var r=document.createElement('pre');r.id='RESULT';
   notice:(document.querySelector('.wo-slot-notice')||{}).textContent||'',
   books:window.__books,idems:window.__idems,busy:/Booking is busy/.test(document.body.innerText),retryScreen:/brief hiccup/.test(document.body.innerText),confirmError:(document.querySelector('.wo-confirm-error')||{}).textContent||'',
   confirmNote:(document.querySelector('.wo-confirm-note')||{}).textContent||'',
+  pageHeading:(document.getElementById('page-heading')||{}).textContent||'',
   progress:Array.prototype.map.call(document.querySelectorAll('.wo-steps-lbl'),function(e){return e.textContent}),
   confirmTitle:(document.querySelector('.wo-confirm-title')||{}).textContent||'',
   confirmRows:Array.prototype.map.call(document.querySelectorAll('.wo-confirm-row-label'),function(e){return e.textContent}),
@@ -116,6 +117,7 @@ window.addEventListener('load',function(){setTimeout(function(){
      setTimeout(finish,5000);});});});
 },3000);});
 </script>
+<h2 id="page-heading">Book Your Filming and Scripting Interview</h2>
 <div id="wo-booking" class="wo-booking">
   <div class="wo-banner">banner</div>
   <div class="wo-stage">

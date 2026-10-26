@@ -196,6 +196,11 @@
       BOOK_MODE === 'filming' ? 'One simple booking: pick your filming time, then confirm.'
       : BOOK_MODE === 'interview' ? 'One simple booking: pick a script interview time that fits your filming date, then confirm.'
       : 'One simple booking: pick your filming time, pick your interview time, then confirm both together.');
+    // The page heading above the widget ("Book Your Filming and Scripting
+    // Interview" on every client page) must name only what a single-
+    // appointment link books (Evan, 2026-10-26).
+    if (BOOK_MODE === 'filming') retext(document.body, /book your filming and scripting interview/i, 'Book Your Filming');
+    if (BOOK_MODE === 'interview') retext(document.body, /book your filming and scripting interview/i, 'Book Your Scripting Interview');
     var sp1 = document.getElementById('wo-step-1-splash');
     if (sp1) retext(sp1, /step\s*1/i, 'Finding available filming times…');
     var sp2 = document.getElementById('wo-step-2-splash');
