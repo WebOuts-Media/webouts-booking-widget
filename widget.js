@@ -15,6 +15,17 @@
     var booking = document.getElementById('wo-booking');
     if (!booking) return;
 
+    // Single-appointment links (2026-10-26). webouts.com/<slug>?book=filming
+    // books filming alone (the provider's script already exists: a backed-out
+    // or Calendly-era provider being rebooked); ?book=interview&p=<token>
+    // books the script interview onto the provider's own filming booking.
+    // p=<token> on any mode is the personal link: the info step is filled in
+    // from the booking behind the token. Anything else is the full flow.
+    var BOOK_MODE = (function () { var m = /[?&]book=(filming|interview)(?:&|$)/.exec(location.search || ''); return m ? m[1] : 'both'; })();
+    var PERSONAL_TOKEN = (function () { var m = /[?&]p=([A-Za-z0-9_.-]+)/.exec(location.search || ''); return m ? m[1] : ''; })();
+    var personal = null;   // GET /manage answer for PERSONAL_TOKEN: { filming, interview, can, ... }
+    var MANAGE_BASE = 'https://app.webouts.com/book/';
+
     // Legacy per-page hidden inputs. These remain the fallback: if the config
     // service can't answer, the page behaves exactly as it did before.
     var cal1El = document.getElementById('wo-cal-1-url');
@@ -94,7 +105,7 @@
     // Bilingual is offered only when the client's English & Spanish filming
     // event is ACTIVE in Calendly, so this re-runs whenever CAL_1_BI_URL changes.
     function applyLangVisibility() {
-      if (langField) langField.style.display = CAL_1_BI_URL ? '' : 'none';
+      if (langField) langField.style.display = (CAL_1_BI_URL && BOOK_MODE !== 'interview') ? '' : 'none';
     }
     applyLangVisibility();
 
@@ -182,7 +193,9 @@
       return false;
     }
     retext(document.body, /two quick steps/i,
-      'One simple booking: pick your filming time, pick your interview time, then confirm both together.');
+      BOOK_MODE === 'filming' ? 'One simple booking: pick your filming time, then confirm.'
+      : BOOK_MODE === 'interview' ? 'One simple booking: pick a script interview time that fits your filming date, then confirm.'
+      : 'One simple booking: pick your filming time, pick your interview time, then confirm both together.');
     var sp1 = document.getElementById('wo-step-1-splash');
     if (sp1) retext(sp1, /step\s*1/i, 'Finding available filming times…');
     var sp2 = document.getElementById('wo-step-2-splash');
@@ -224,7 +237,14 @@
     })();
 
     // (c) Progress indicator injected at the top of the white stage.
-    var PROGRESS_STAGES = [
+    var PROGRESS_STAGES = BOOK_MODE === 'filming' ? [
+      { label: 'Your info', ids: ['wo-step-0'] },
+      { label: 'Filming', ids: ['wo-step-1-splash', 'wo-step-1'] },
+      { label: 'Confirm', ids: ['wo-step-2-splash', 'wo-step-2'] }
+    ] : BOOK_MODE === 'interview' ? [
+      { label: 'Your info', ids: ['wo-step-0'] },
+      { label: 'Interview', ids: ['wo-step-2-splash', 'wo-step-2'] }
+    ] : [
       { label: 'Your info', ids: ['wo-step-0'] },
       { label: 'Filming', ids: ['wo-step-1-splash', 'wo-step-1'] },
       { label: 'Interview', ids: ['wo-step-2-splash', 'wo-step-2'] }
@@ -1007,6 +1027,7 @@
     var PREFETCH_TTL = 600000;  // refetch if older than 10 minutes
 
     function warmFilming() {
+      if (BOOK_MODE === 'interview') return;   // filming is already booked
       var url = selectedFilmingUrl();
       if (!url) return;
       var entry = filmingPrefetch[url];
@@ -1161,6 +1182,15 @@
       }
       var prev = selectedFilming;
       selectedFilming = { start_time: startTime, scheduling_url: url };
+      if (BOOK_MODE === 'filming') {
+        // Filming only: nothing to pair it with, confirm right away.
+        selectedScripting = null;
+        chosenScriptingTime = null;
+        show('wo-step-2');
+        renderCombinedConfirm();
+        scrollToWizard();
+        return;
+      }
       if (prev && prev.start_time === startTime && scriptingSlots && scriptingSlots.length &&
           scriptingMeta && scriptingSlotsForStart === startTime) {
         // Same time re-picked after "Change": return to where they left off.
@@ -1246,9 +1276,10 @@
       bar.className = 'wo-selectbar';
       var text = document.createElement('span');
       text.className = 'wo-selectbar-text';
-      text.textContent = 'Filming: ' + fmtRecapDate(selectedFilming.start_time) + ' · ' +
-        fmtRecapTime(selectedFilming.start_time) + ' (selected)';
+      text.textContent = (BOOK_MODE === 'interview' ? 'Your filming: ' : 'Filming: ') + fmtRecapDate(selectedFilming.start_time) + ' · ' +
+        fmtRecapTime(selectedFilming.start_time) + (BOOK_MODE === 'interview' ? ' (booked)' : ' (selected)');
       bar.appendChild(text);
+      if (BOOK_MODE === 'interview') return bar;   // the filming is booked; it changes from the manage link, not here
       var change = document.createElement('button');
       change.type = 'button';
       change.className = 'wo-selectbar-change';
@@ -1347,7 +1378,9 @@
         title: 'Pick your script interview time',
         notice: notice || null,
         selectedTime: selectedScripting ? selectedScripting.start_time : null,
-        intro: 'A 20-minute phone call that builds your script. Nothing’s booked yet — you’ll confirm both times on the next screen.'
+        intro: BOOK_MODE === 'interview'
+          ? 'A 20-minute phone call that builds your script. Nothing’s booked yet — you’ll confirm on the next screen.'
+          : 'A 20-minute phone call that builds your script. Nothing’s booked yet — you’ll confirm both times on the next screen.'
       });
     }
 
@@ -1368,6 +1401,17 @@
       host.appendChild(buildSelectionBar());
       var msg = document.createElement('div');
       msg.className = 'wo-slots-msg';
+      if (BOOK_MODE === 'interview') {
+        msg.innerHTML =
+          '<h3>No interview times fit your filming date</h3>' +
+          '<p>Your script interview must be at least ' + minDays + ' days before filming, and no interview times are open that early.</p>' +
+          '<p class="wo-slots-contact">Contact Cam Kubasta at ' +
+          '<a href="tel:+19202145227">(920) 214-5227</a> or ' +
+          '<a href="mailto:ckubasta@webouts.com">ckubasta@webouts.com</a> and we’ll find a time together.</p>';
+        host.appendChild(msg);
+        applyFade(host);
+        return;
+      }
       msg.innerHTML =
         '<h3>That filming date needs an earlier interview</h3>' +
         '<p>Your script interview must be at least ' + minDays + ' days before filming, and no interview times are open that early. Choosing a later filming date usually opens things up.</p>' +
@@ -1408,6 +1452,7 @@
       sb.textContent = sub;
       body.appendChild(sb);
       row.appendChild(body);
+      if (!changeFn) return row;   // a booked appointment shown for context
       var chg = document.createElement('button');
       chg.type = 'button';
       chg.className = 'wo-confirm-row-change';
@@ -1435,8 +1480,8 @@
       var back = document.createElement('button');
       back.type = 'button';
       back.className = 'wo-back-btn';
-      back.textContent = '← Back to interview times';
-      back.addEventListener('click', function () { renderInterviewPicker(null); });
+      back.textContent = BOOK_MODE === 'filming' ? '← Back to filming times' : '← Back to interview times';
+      back.addEventListener('click', function () { if (BOOK_MODE === 'filming') goBackToFilmingPicker(); else renderInterviewPicker(null); });
       bar.appendChild(back);
       host.appendChild(bar);
 
@@ -1445,7 +1490,8 @@
 
       var title = document.createElement('div');
       title.className = 'wo-confirm-title';
-      title.textContent = 'Confirm Your Appointments';
+      title.textContent = BOOK_MODE === 'filming' ? 'Confirm Your Filming Session'
+        : BOOK_MODE === 'interview' ? 'Confirm Your Script Interview' : 'Confirm Your Appointments';
       card.appendChild(title);
 
       // Name + email sit directly under the title so the two centered
@@ -1457,14 +1503,21 @@
 
       var rows = document.createElement('div');
       rows.className = 'wo-confirm-rows';
-      rows.appendChild(confirmRow('1', 'Filming Session', selectedFilming.start_time,
-        'On camera · at the studio', goBackToFilmingPicker));
-      rows.appendChild(confirmRow('2', 'Script Interview', selectedScripting.start_time,
-        '20-minute phone call', function () { renderInterviewPicker(null); }));
+      if (BOOK_MODE === 'interview') {
+        rows.appendChild(confirmRow('✓', 'Filming Session', selectedFilming.start_time,
+          'Already booked · at the studio', null));
+        rows.appendChild(confirmRow('1', 'Script Interview', selectedScripting.start_time,
+          '20-minute phone call', function () { renderInterviewPicker(null); }));
+      } else {
+        rows.appendChild(confirmRow('1', 'Filming Session', selectedFilming.start_time,
+          'On camera · at the studio', goBackToFilmingPicker));
+        if (BOOK_MODE !== 'filming') rows.appendChild(confirmRow('2', 'Script Interview', selectedScripting.start_time,
+          '20-minute phone call', function () { renderInterviewPicker(null); }));
+      }
       card.appendChild(rows);
 
-      var fQs = (filmingMeta && filmingMeta.custom_questions) || [];
-      var sQs = (scriptingMeta && scriptingMeta.custom_questions) || [];
+      var fQs = BOOK_MODE === 'interview' ? [] : ((filmingMeta && filmingMeta.custom_questions) || []);
+      var sQs = BOOK_MODE === 'filming' ? [] : ((scriptingMeta && scriptingMeta.custom_questions) || []);
       var both = fQs.length && sQs.length;
       var filmingFields = [];
       var scriptingFields = [];
@@ -1485,23 +1538,26 @@
       err.className = 'wo-confirm-error';
       card.appendChild(err);
 
+      var confirmLabel = BOOK_MODE === 'filming' ? 'Confirm Filming' : BOOK_MODE === 'interview' ? 'Confirm Interview' : 'Confirm Both Bookings';
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'wo-confirm-btn';
-      btn.textContent = 'Confirm Both Bookings';
+      btn.textContent = confirmLabel;
       card.appendChild(btn);
 
       var note = document.createElement('p');
       note.className = 'wo-confirm-note';
-      note.textContent = ENGINE_MODE
+      note.textContent = BOOK_MODE !== 'both'
+        ? 'We’ll email your confirmation with a link to make changes.'
+        : ENGINE_MODE
         ? 'One click books both. We’ll email your confirmation with a link to make changes.'
         : 'One click books both. You’ll get a confirmation email for each, with reschedule and cancel links.';
       card.appendChild(note);
 
       btn.addEventListener('click', function () {
         err.textContent = '';
-        var fCol = collectAnswers(filmingFields);
-        var sCol = collectAnswers(scriptingFields);
+        var fCol = BOOK_MODE === 'interview' ? { answers: [], missing: false } : collectAnswers(filmingFields);
+        var sCol = BOOK_MODE === 'filming' ? { answers: [], missing: false } : collectAnswers(scriptingFields);
         if (fCol.missing || sCol.missing) {
           err.textContent = 'Please answer the required questions above.';
           scrollFirstInvalid(card);
@@ -1511,7 +1567,7 @@
         // fallback) uses only these locals, never the mutable globals, so a
         // stray click mid-flight can't change what gets booked or shown.
         var fSlot = selectedFilming;
-        var sSlot = selectedScripting;
+        var sSlot = BOOK_MODE === 'filming' ? null : selectedScripting;
         bookingInProgress = true;
         unloadGuardOn = true;
 
@@ -1525,29 +1581,41 @@
         // Engine pages: one all-or-nothing request for both. If either time
         // was just taken nothing is booked, so the provider simply picks again.
         if (ENGINE_MODE) {
-          btn.textContent = 'Booking your filming and interview…';
+          btn.textContent = BOOK_MODE === 'filming' ? 'Booking your filming…' : BOOK_MODE === 'interview' ? 'Booking your interview…' : 'Booking your filming and interview…';
           if (!engineIdem) engineIdem = 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
           var settleIdem = function () { if (!engineIdemUnsure) engineIdem = null; };
           var reEnable = function (msg) {
             bookingInProgress = false;
             unloadGuardOn = false;
             Array.prototype.forEach.call(host.querySelectorAll('button'), function (b) { b.disabled = false; });
-            btn.textContent = 'Confirm Both Bookings';
+            btn.textContent = confirmLabel;
             err.textContent = msg;
           };
-          postForm(ENGINE_API + '/compat/engine/book',
-            'filming_key=' + encodeURIComponent(filmingMeta.event_type_uri) +
-            '&filming_start=' + encodeURIComponent(fSlot.start_time) +
-            '&interview_start=' + encodeURIComponent(sSlot.start_time) +
+          var who =
             '&first_name=' + encodeURIComponent(doctorPrefill.firstName) +
             '&last_name=' + encodeURIComponent(doctorPrefill.lastName) +
             '&email=' + encodeURIComponent(doctorPrefill.email) +
             '&timezone=' + encodeURIComponent(TIMEZONE) +
             '&sms=' + encodeURIComponent(doctorPrefill.smsReminderNumber || '') +
             '&guests=' + encodeURIComponent(JSON.stringify(savedGuests || [])) +
-            '&filming_answers=' + encodeURIComponent(JSON.stringify(fCol.answers)) +
-            '&interview_answers=' + encodeURIComponent(JSON.stringify(sCol.answers)) +
-            '&idem_key=' + encodeURIComponent(engineIdem))
+            '&idem_key=' + encodeURIComponent(engineIdem);
+          var params = BOOK_MODE === 'interview'
+            ? 'kind=interview' +
+              '&interview_key=' + encodeURIComponent(scriptingMeta.event_type_uri) +
+              '&interview_start=' + encodeURIComponent(sSlot.start_time) +
+              '&manage_token=' + encodeURIComponent(PERSONAL_TOKEN) +
+              '&interview_answers=' + encodeURIComponent(JSON.stringify(sCol.answers)) + who
+            : BOOK_MODE === 'filming'
+            ? 'kind=filming' +
+              '&filming_key=' + encodeURIComponent(filmingMeta.event_type_uri) +
+              '&filming_start=' + encodeURIComponent(fSlot.start_time) +
+              '&filming_answers=' + encodeURIComponent(JSON.stringify(fCol.answers)) + who
+            : 'filming_key=' + encodeURIComponent(filmingMeta.event_type_uri) +
+              '&filming_start=' + encodeURIComponent(fSlot.start_time) +
+              '&interview_start=' + encodeURIComponent(sSlot.start_time) +
+              '&filming_answers=' + encodeURIComponent(JSON.stringify(fCol.answers)) +
+              '&interview_answers=' + encodeURIComponent(JSON.stringify(sCol.answers)) + who;
+          postForm(ENGINE_API + '/compat/engine/book', params)
             .then(function (res) {
               if (res && res.ok) {
                 filmingBooked = true;
@@ -1555,11 +1623,23 @@
                 bookingLinks.scripting = res.scripting;
                 lastFilmingEventUri = (res.filming && res.filming.event_uri) || '';
                 scriptingFilmingStart = fSlot.start_time;
-                chosenScriptingTime = sSlot.start_time;
+                chosenScriptingTime = sSlot ? sSlot.start_time : null;
                 bookingInProgress = false;
                 renderRecap();
                 show('wo-all-done');
                 scrollToWizard();
+                return;
+              }
+              if (res && res.error === 'bad_link') {
+                settleIdem();
+                reEnable('This link no longer matches a filming booking. Contact Cam Kubasta at (920) 214-5227 or ckubasta@webouts.com.');
+                return;
+              }
+              if (res && (res.error === 'interview_exists' || res.error === 'filming_booking_required' || res.error === 'contact_webouts')) {
+                settleIdem();
+                reEnable(res.error === 'interview_exists'
+                  ? 'You already have a script interview booked. Use the link in your confirmation email to change it.'
+                  : 'We couldn’t add an interview to this filming booking. Contact Cam Kubasta at (920) 214-5227 or ckubasta@webouts.com.');
                 return;
               }
               if (res && res.error === 'duplicate_request') {
@@ -1870,7 +1950,11 @@
         '<div class="wo-check">✓</div>' +
         '<h2>You’re all set!</h2>' +
         '<div class="wo-recap"></div>' +
-        '<p class="wo-recap-next">Calendar invites are on their way to your inbox. We’ll craft your script together at the interview, and everything locks in one week before filming.</p>';
+        '<p class="wo-recap-next">' + (BOOK_MODE === 'filming'
+          ? 'A calendar invite is on its way to your inbox. Everything locks in one week before filming.'
+          : BOOK_MODE === 'interview'
+          ? 'A calendar invite is on its way to your inbox. We’ll craft your script together at the interview.'
+          : 'Calendar invites are on their way to your inbox. We’ll craft your script together at the interview, and everything locks in one week before filming.') + '</p>';
       var recap = host.querySelector('.wo-recap');
       if (chosenScriptingTime) recap.appendChild(recapRow('Script Interview', chosenScriptingTime, bookingLinks.scripting));
       if (scriptingFilmingStart) recap.appendChild(recapRow('Filming Session', scriptingFilmingStart, bookingLinks.filming));
@@ -1958,6 +2042,16 @@
         smsReminderNumber: phoneE164
       };
 
+      if (BOOK_MODE === 'interview') {
+        // The filming is booked already (behind the personal token); straight to interview times that fit it.
+        if (!personal) { personalReady.then(function (d) { if (d) handleContinue(); }); return; }
+        selectedFilming = { start_time: personal.filming.start, scheduling_url: '' };
+        pendingRestoreScripting = null;
+        show('wo-step-2-splash');
+        restartLoadbar('wo-step-2-splash');
+        loadInterviewStep();
+        return;
+      }
       show('wo-step-1-splash');
       restartLoadbar('wo-step-1-splash');
       loadFilmingStep();
@@ -1988,6 +2082,79 @@
     // the resolved config so it warms the right calendar — and so a page with
     // no hidden inputs has a URL to warm at all.
     configReady.then(warmFilming);
+
+    // ---- Personal link (p=<token>) and the interview-only mode ----
+    // The token is the provider's own manage token; GET /manage answers with
+    // their booking, so the info step is filled in for them. Interview-only
+    // needs it: the interview is booked onto that filming.
+    function renderModeProblem(heading, body, manageTok) {
+      var s0 = document.getElementById('wo-step-0');
+      if (!s0) return;
+      s0.innerHTML = '';
+      var msg = document.createElement('div');
+      msg.className = 'wo-slots-msg';
+      msg.innerHTML = '<h3></h3><p></p>' +
+        '<p class="wo-slots-contact">Contact Cam Kubasta at <a href="tel:+19202145227">(920) 214-5227</a> or ' +
+        '<a href="mailto:ckubasta@webouts.com">ckubasta@webouts.com</a>.</p>';
+      msg.querySelector('h3').textContent = heading;
+      msg.querySelector('p').textContent = body;
+      if (manageTok) {
+        var a = document.createElement('a');
+        a.className = 'wo-confirm-btn wo-pickother-btn';
+        a.href = MANAGE_BASE + encodeURIComponent(pageSlug) + '?manage=' + encodeURIComponent(manageTok);
+        a.textContent = 'Manage your booking';
+        msg.appendChild(a);
+      }
+      s0.appendChild(msg);
+      show('wo-step-0');
+      applyFade(s0);
+    }
+    function applyPersonal(d) {
+      var b = d.filming || d.interview;
+      if (!b) return false;
+      var set = function (id, v) { var el = document.getElementById(id); if (el && v) el.value = v; };
+      set('wo_first_name', b.first_name);
+      set('wo_last_name', b.last_name);
+      set('wo_email', b.email);
+      var phone = String(b.phone || '').replace(/[^+\d]/g, '');
+      var cc = document.getElementById('wo_country');
+      if (phone && cc) {
+        // Split off the country code the page knows (longest first: +1 must not swallow +1x).
+        var codes = Array.prototype.map.call(cc.options, function (o) { return o.value; })
+          .filter(function (v) { return /^\+\d+$/.test(v); })
+          .sort(function (a, b) { return b.length - a.length; });
+        var code = null;
+        for (var i = 0; i < codes.length; i++) { if (phone.indexOf(codes[i]) === 0) { code = codes[i]; break; } }
+        if (code) { cc.value = code; set('wo_phone', phone.slice(code.length)); }
+        else set('wo_phone', phone.replace(/[^\d]/g, ''));
+      }
+      if (d.filming && d.filming.language === 'en_es') {
+        var bi = document.querySelector('input[name="wo_language"][value="bilingual"]');
+        if (bi) bi.checked = true;
+      }
+      return !!(b.first_name && b.last_name && b.email && phone);
+    }
+    var personalReady = (function () {
+      if (!PERSONAL_TOKEN || !window.fetch) return Promise.resolve(null);
+      return fetch(ENGINE_API + '/manage?t=' + encodeURIComponent(PERSONAL_TOKEN))
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { return d && d.ok ? d : null; })
+        .catch(function () { return null; });
+    })();
+    personalReady.then(function (d) {
+      if (BOOK_MODE === 'interview') {
+        if (!PERSONAL_TOKEN) { renderModeProblem('This link needs your booking', 'A script interview is booked onto an existing filming session, so this page needs the personal link from your confirmation email or text.'); return; }
+        if (!d) { renderModeProblem('We couldn’t open your booking', 'This link didn’t match a booking. It may have been cancelled, or the link may be incomplete.'); return; }
+        if (!d.filming || d.filming.status !== 'confirmed') { renderModeProblem('No filming session to pair with', 'A script interview is booked onto a filming session, and this booking has no upcoming filming.', d.manage_token); return; }
+        if (d.interview && d.interview.status === 'confirmed') { renderModeProblem('Your interview is already booked', 'Your script interview is on the calendar. To change it, use Manage your booking.', d.manage_token); return; }
+        if (!(d.can && d.can.book_interview)) { renderModeProblem('Too close to filming to book online', 'Your filming is inside the window where interview changes go through us.', d.manage_token); return; }
+      }
+      if (!d) return;
+      personal = d;
+      var complete = applyPersonal(d);
+      // The personal link skips the info step when the booking holds every field.
+      if (complete) configReady.then(function () { if (!isLocked()) handleContinue(); });
+    });
 
     // Lock the whole wizard immediately if anything the booking depends on is
     // down, then keep checking so it unlocks on its own the moment it returns.

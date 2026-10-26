@@ -10,6 +10,13 @@
      engine=availdown      engine mode, then filming availability network-fails: busy screen, no Calendly iframe
      engine=n8nhang        engine says moved while the n8n config never answers: books normally
      engine=bookretry      first combined booking network-fails; the retry must reuse the same idem_key
+     Single-appointment links (2026-10-26), added to the URL as the widget reads them:
+       book=filming            filming only: slot -> confirm card -> one kind=filming booking, no interview step
+       book=filming&p=tok      personal link: info step filled from GET /manage and skipped
+       book=interview&p=tok    interview only onto the token's filming: interview slot -> kind=interview booking
+       book=interview          no token: problem screen, nothing booked
+       book=interview&p=bad    token unknown: problem screen
+       book=interview&p=tok&ivexists=1   interview already booked: problem screen with Manage link
      Every engine case must open zero Calendly iframes and never call wo-create-booking.
      Run: chrome --headless=new --virtual-time-budget=30000 --dump-dom http://localhost:PORT/engine-harness.html?engine=ok --><body>
 <script>
@@ -25,6 +32,13 @@ var iv=new Date(day.getTime()-12*864e5).toISOString();
 
 window.__books=0;
 function engineStub(url,body){var e=Q.get('engine');
+ if(url.indexOf('/manage?t=')>-1){window.__log.push('ENGINE_MANAGE '+url.split('t=')[1]);
+   if(Q.get('p')==='bad')return J({ok:false,error:'bad_token'});
+   var ivx=!!Q.get('ivexists');
+   return J({ok:true,manage_token:Q.get('p'),page_slug:'x',
+     filming:{id:'bk_f',status:'confirmed',start:f1,language:Q.get('lang')==='bi'?'en_es':'en',first_name:'Pre',last_name:'Filled',email:'esmoll@webouts.com',phone:'+14075550142'},
+     interview:ivx?{id:'bk_i',status:'confirmed',start:iv}:null,
+     can:{reschedule_filming:true,reschedule_interview:ivx,book_interview:!ivx}});}
  if(url.indexOf('/compat/config')>-1){window.__log.push('ENGINE_CONFIG');
    if(e==='down')return new Promise(function(){});           // never answers
    return J({ok:true,provider:'engine',slug:'x',filming:'engine:x:filming',bilingual:'',scripting:'engine:x:interview'});}
@@ -34,13 +48,15 @@ function engineStub(url,body){var e=Q.get('engine');
    return J({ok:true,event_type_uri:'engine:x:filming',custom_questions:[],bookedOutMonths:[],slots:[{start_time:f1,scheduling_url:''},{start_time:f2,scheduling_url:''}]});}
  if(url.indexOf('/compat/engine/scripting-availability')>-1){window.__log.push('ENGINE_SCRIPTING');
    return J({ok:true,event_type_uri:'engine:x:interview',custom_questions:[],min_days:7,slots:[{start_time:iv,scheduling_url:''}]});}
- if(url.indexOf('/compat/engine/book')>-1){window.__books++;window.__log.push('ENGINE_BOOK '+(/filming_key=([^&]+)/.exec(body)||[])[1]);
+ if(url.indexOf('/compat/engine/book')>-1){window.__books++;window.__log.push('ENGINE_BOOK '+((/filming_key=([^&]+)/.exec(body)||[])[1]||(/interview_key=([^&]+)/.exec(body)||[])[1])+' kind='+((/(?:^|&)kind=([a-z]+)/.exec(body)||[])[1]||'both')+' iv='+/interview_start=/.test(body)+' tok='+/manage_token=/.test(body));
    window.__idems.push((/idem_key=([^&]+)/.exec(body)||[])[1]);
    if(e==='bookfail')return Promise.reject(new Error('net'));
    if(e==='bookretry'&&window.__books===1)return Promise.reject(new Error('net'));
    if(e==='ivtaken'&&window.__books===1)return J({ok:false,slot_taken:true,part:'interview'});
    if(e==='filmtaken'&&window.__books===1)return J({ok:false,slot_taken:true,part:'filming'});
-   return J({ok:true,filming:{ok:true,event_uri:'engine:booking:bk_f',reschedule_url:'https://webouts.com/x?manage=t',cancel_url:''},scripting:{ok:true,event_uri:'engine:booking:bk_i',reschedule_url:'https://webouts.com/x?manage=t',cancel_url:''}});}
+   var kind=(/(?:^|&)kind=([a-z]+)/.exec(body)||[])[1]||'both';
+   var F={ok:true,event_uri:'engine:booking:bk_f',reschedule_url:'https://webouts.com/x?manage=t',cancel_url:''}, I={ok:true,event_uri:'engine:booking:bk_i',reschedule_url:'https://webouts.com/x?manage=t',cancel_url:''};
+   return J({ok:true,filming:F,scripting:kind==='filming'?null:I});}
  return null;}
 window.fetch=function(url,opts){url=String(url);var body=(opts&&opts.body)||'';
  var es=engineStub(url,body);if(es)return es;
@@ -64,11 +80,31 @@ function finish(){var r=document.createElement('pre');r.id='RESULT';
   earlierInterviewScreen:/needs an earlier interview/.test(document.body.innerText),
   notice:(document.querySelector('.wo-slot-notice')||{}).textContent||'',
   books:window.__books,idems:window.__idems,busy:/Booking is busy/.test(document.body.innerText),retryScreen:/brief hiccup/.test(document.body.innerText),confirmError:(document.querySelector('.wo-confirm-error')||{}).textContent||'',
-  confirmNote:(document.querySelector('.wo-confirm-note')||{}).textContent||''});document.body.appendChild(r);}
+  confirmNote:(document.querySelector('.wo-confirm-note')||{}).textContent||'',
+  progress:Array.prototype.map.call(document.querySelectorAll('.wo-steps-lbl'),function(e){return e.textContent}),
+  confirmTitle:(document.querySelector('.wo-confirm-title')||{}).textContent||'',
+  confirmRows:Array.prototype.map.call(document.querySelectorAll('.wo-confirm-row-label'),function(e){return e.textContent}),
+  recap:Array.prototype.map.call(document.querySelectorAll('.wo-recap-label'),function(e){return e.textContent}),
+  recapNext:(document.querySelector('.wo-recap-next')||{}).textContent||'',
+  problem:(document.querySelector('#wo-step-0 .wo-slots-msg h3')||{}).textContent||'',
+  manageLink:(document.querySelector('#wo-step-0 .wo-slots-msg a.wo-confirm-btn')||{}).href||'',
+  prefill:(function(){var g=function(id){var e=document.getElementById(id);return e?e.value:null};var l2=document.getElementById('l2');return {first:g('wo_first_name'),last:g('wo_last_name'),email:g('wo_email'),phone:g('wo_phone'),cc:g('wo_country'),bi:l2?l2.checked:null}})()});document.body.appendChild(r);}
 window.addEventListener('load',function(){setTimeout(function(){
- document.getElementById('wo_first_name').value='Test';document.getElementById('wo_last_name').value='Provider';
- document.getElementById('wo_email').value='esmoll@webouts.com';document.getElementById('wo_phone').value='4075550142';
- document.getElementById('wo-continue').click();
+ var mode=Q.get('book')||'both';
+ if(!Q.get('p')&&document.getElementById('wo_first_name')){
+  document.getElementById('wo_first_name').value='Test';document.getElementById('wo_last_name').value='Provider';
+  document.getElementById('wo_email').value='esmoll@webouts.com';document.getElementById('wo_phone').value='4075550142';
+  document.getElementById('wo-continue').click();
+ }
+ if(mode==='interview'){
+  if(!Q.get('p')||Q.get('p')==='bad'||Q.get('ivexists')){setTimeout(finish,5000);return;}
+  waitFor('#wo-cal-2 .wo-slot-btn',function(b2){b2.click();waitFor('.wo-confirm-btn',function(c){c.click();setTimeout(finish,4000);});});
+  return;
+ }
+ if(mode==='filming'){
+  waitFor('#wo-cal-1 .wo-slot-btn',function(b){b.click();waitFor('.wo-confirm-btn',function(c){c.click();setTimeout(finish,4000);});});
+  return;
+ }
  if(Q.get('engine')==='availfail'||Q.get('engine')==='availdown'||Q.get('moved')){setTimeout(finish,8000);return;}
  waitFor('#wo-cal-1 .wo-slot-btn',function(b){b.click();
   if(Q.get('ivslots')==='none'){setTimeout(finish,4000);return;}
