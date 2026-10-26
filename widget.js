@@ -187,10 +187,10 @@
         if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') continue;
         for (var j = 0; j < el.childNodes.length; j++) {
           var n = el.childNodes[j];
-          if (n.nodeType === 3 && matchRe.test(n.nodeValue || '')) { n.nodeValue = newText; return true; }
+          if (n.nodeType === 3 && matchRe.test(n.nodeValue || '')) { n.nodeValue = newText; return el; }
         }
       }
-      return false;
+      return null;
     }
     retext(document.body, /two quick steps/i,
       BOOK_MODE === 'filming' ? 'One simple booking: pick your filming time, then confirm.'
@@ -199,8 +199,31 @@
     // The page heading above the widget ("Book Your Filming and Scripting
     // Interview" on every client page) must name only what a single-
     // appointment link books (Evan, 2026-10-26).
-    if (BOOK_MODE === 'filming') retext(document.body, /book your filming and scripting interview/i, 'Book Your Filming');
-    if (BOOK_MODE === 'interview') retext(document.body, /book your filming and scripting interview/i, 'Book Your Scripting Interview');
+    var pageHeading = null;
+    if (BOOK_MODE === 'filming') pageHeading = retext(document.body, /book your filming and scripting interview/i, 'Book Your Filming');
+    if (BOOK_MODE === 'interview') pageHeading = retext(document.body, /book your filming and scripting interview/i, 'Book Your Scripting Interview');
+    // A single-appointment link goes to a provider who has already been
+    // through the page: show only the heading and the booking widget, nothing
+    // else on the page (Evan, 2026-10-26). Everything outside the two is
+    // hidden by walking each one's ancestors and hiding every sibling that
+    // holds neither.
+    if (BOOK_MODE !== 'both') {
+      var hideAround = function (start) {
+        var node = start;
+        while (node && node.parentNode && node !== document.body) {
+          var parent = node.parentNode;
+          Array.prototype.forEach.call(parent.children, function (sib) {
+            if (sib === node || /^(SCRIPT|STYLE|LINK)$/.test(sib.tagName)) return;
+            if (sib.contains(booking) || (pageHeading && sib.contains(pageHeading))) return;
+            sib.style.setProperty('display', 'none', 'important');
+          });
+          node = parent;
+        }
+      };
+      hideAround(booking);
+      if (pageHeading) hideAround(pageHeading);
+      booking.style.marginBottom = '48px';
+    }
     var sp1 = document.getElementById('wo-step-1-splash');
     if (sp1) retext(sp1, /step\s*1/i, 'Finding available filming times…');
     var sp2 = document.getElementById('wo-step-2-splash');

@@ -82,6 +82,8 @@ function finish(){var r=document.createElement('pre');r.id='RESULT';
   books:window.__books,idems:window.__idems,busy:/Booking is busy/.test(document.body.innerText),retryScreen:/brief hiccup/.test(document.body.innerText),confirmError:(document.querySelector('.wo-confirm-error')||{}).textContent||'',
   confirmNote:(document.querySelector('.wo-confirm-note')||{}).textContent||'',
   pageHeading:(document.getElementById('page-heading')||{}).textContent||'',
+  hiddenAround:['site-header','intro-copy','site-footer'].filter(function(id){var e=document.getElementById(id);return e&&getComputedStyle(e).display==='none';}),
+  headingShown:!!document.getElementById('page-heading')&&getComputedStyle(document.getElementById('page-heading')).display!=='none',
   progress:Array.prototype.map.call(document.querySelectorAll('.wo-steps-lbl'),function(e){return e.textContent}),
   confirmTitle:(document.querySelector('.wo-confirm-title')||{}).textContent||'',
   confirmRows:Array.prototype.map.call(document.querySelectorAll('.wo-confirm-row-label'),function(e){return e.textContent}),
@@ -117,7 +119,8 @@ window.addEventListener('load',function(){setTimeout(function(){
      setTimeout(finish,5000);});});});
 },3000);});
 </script>
-<h2 id="page-heading">Book Your Filming and Scripting Interview</h2>
+<header id="site-header">site nav</header>
+<section><p id="intro-copy">Orlando Health Physician Profiles serve a simple purpose.</p><h2 id="page-heading">Book Your Filming and Scripting Interview</h2></section>
 <div id="wo-booking" class="wo-booking">
   <div class="wo-banner">banner</div>
   <div class="wo-stage">
@@ -144,4 +147,5 @@ window.addEventListener('load',function(){setTimeout(function(){
   </div>
 </div>
 
-<script src="./widget.js"></script></body>
+<script src="./widget.js"></script><footer id="site-footer">footer</footer>
+</body>
