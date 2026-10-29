@@ -45,7 +45,7 @@ function engineStub(url,body){var e=Q.get('engine');
  if(url.indexOf('/compat/engine/filming-availability')>-1){window.__log.push('ENGINE_FILMING');
    if(e==='availfail')return J({ok:false,reason:'availability_fetch_failed'});
    if(e==='availdown')return Promise.reject(new Error('net'));
-   return J({ok:true,event_type_uri:'engine:x:filming',custom_questions:[],bookedOutMonths:[],slots:[{start_time:f1,scheduling_url:''},{start_time:f2,scheduling_url:''}]});}
+   return J({ok:true,tz:'America/New_York',event_type_uri:'engine:x:filming',custom_questions:[],bookedOutMonths:[],slots:[{start_time:f1,scheduling_url:''},{start_time:f2,scheduling_url:''}]});}
  if(url.indexOf('/compat/engine/scripting-availability')>-1){window.__log.push('ENGINE_SCRIPTING');
    return J({ok:true,event_type_uri:'engine:x:interview',custom_questions:[],min_days:7,slots:[{start_time:iv,scheduling_url:''}]});}
  if(url.indexOf('/compat/engine/book')>-1){window.__books++;window.__log.push('ENGINE_BOOK '+((/filming_key=([^&]+)/.exec(body)||[])[1]||(/interview_key=([^&]+)/.exec(body)||[])[1])+' kind='+((/(?:^|&)kind=([a-z]+)/.exec(body)||[])[1]||'both')+' iv='+/interview_start=/.test(body)+' tok='+/manage_token=/.test(body));
