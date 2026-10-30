@@ -84,14 +84,19 @@
       var ask = fetch(ENGINE_API + '/compat/config?slug=' + encodeURIComponent(pageSlug))
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
-          if (d && d.ok && d.provider === 'engine' && d.filming && d.scripting) return { state: 'engine', d: d };
+          if (d && d.ok && d.provider === 'engine' && d.filming && (d.scripting || d.oneoff)) return { state: 'engine', d: d };
           return d && d.ok ? { state: 'calendly' } : { state: 'none' };
         })
         .catch(function () { return { state: 'none' }; });
       return Promise.race([ask, timeout]);
     }
+    // One-off filming link (2026-10-29): a staff-made page at
+    // app.webouts.com/book/x-...?book=filming for one shoot. Filming only, no
+    // script interview; { title, closed } from the engine's config answer.
+    var ONEOFF = null;
     function useEngine(d) {
       ENGINE_MODE = true;
+      ONEOFF = d.oneoff || null;
       CAL_1_URL = d.filming;
       CAL_2_URL = d.scripting;
       CAL_1_BI_URL = d.bilingual || '';
@@ -155,7 +160,8 @@
     // Both links are required to complete a booking, and every fallback path in
     // this widget still needs a Calendly URL to hand off to. No links = nothing
     // this page can do.
-    function bookingUsable() { return !!CAL_1_URL && !!CAL_2_URL; }
+    // A one-off link has no interview, so only its filming key is needed.
+    function bookingUsable() { return !!CAL_1_URL && (!!CAL_2_URL || !!ONEOFF); }
 
     var configSettled = false;
     var configReady = fetchConfig().then(function () {
@@ -202,6 +208,8 @@
     var pageHeading = null;
     if (BOOK_MODE === 'filming') pageHeading = retext(document.body, /book your filming and scripting interview/i, 'Book Your Filming');
     if (BOOK_MODE === 'interview') pageHeading = retext(document.body, /book your filming and scripting interview/i, 'Book Your Scripting Interview');
+    // A one-off link page names its own heading (the shoot's title).
+    if (!pageHeading) pageHeading = document.getElementById('wo-page-heading');
     // A single-appointment link goes to a provider who has already been
     // through the page: show only the heading and the booking widget, nothing
     // else on the page (Evan, 2026-10-26). Everything outside the two is
@@ -1233,11 +1241,13 @@
       var slots = mKey === null ? filmingState.slots :
         filmingState.slots.filter(function (s) { return monthKey(new Date(s.start_time)) === mKey; });
       renderPicker('wo-cal-1', slots, chooseFilmingSlot, {
-        title: 'Pick your arrival time',
-        intro: 'This is the time you arrive at the studio. Hair and makeup takes 15 minutes, then you film for 45.',
+        title: ONEOFF && !ONEOFF.hm ? 'Pick your filming time' : 'Pick your arrival time',
+        intro: !ONEOFF ? 'This is the time you arrive at the studio. Hair and makeup takes 15 minutes, then you film for 45.'
+          : slots.length && slots[0].arrival_time && slots[0].arrival_time !== slots[0].start_time ? 'This is the time you arrive' + (ONEOFF.place ? '' : ' at the studio') + '. Hair and makeup takes 15 minutes, then filming starts.'
+          : 'This is the time filming starts' + (ONEOFF.place ? '' : ' at the studio') + '.',
         tz: FILM_TZ,
         arrival: true,
-        zoneNote: FILM_TZ ? 'Times are in ' + zoneName(FILM_TZ) + ', the studio\u2019s time zone.' : null,
+        zoneNote: FILM_TZ ? 'Times are in ' + zoneName(FILM_TZ) + (ONEOFF && ONEOFF.place ? ', local time there.' : ', the studio\u2019s time zone.') : null,
         onBack: mKey === null ? null : renderFilmingPicker,
         backLabel: '← All months'
       });
@@ -1586,7 +1596,8 @@
           '20-minute phone call', function () { renderInterviewPicker(null); }));
       } else {
         rows.appendChild(confirmRow('1', 'Filming Session', selectedFilming.start_time,
-          '15 min hair & makeup, then 45 min on camera · at the studio', goBackToFilmingPicker, FILM_TZ, true));
+          ONEOFF ? (ONEOFF.hm ? '15 min hair & makeup, then ' : '') + ONEOFF.minutes + ' min on camera · ' + (ONEOFF.place || 'at the studio')
+            : '15 min hair & makeup, then 45 min on camera · at the studio', goBackToFilmingPicker, FILM_TZ, true));
         if (BOOK_MODE !== 'filming') rows.appendChild(confirmRow('2', 'Script Interview', selectedScripting.start_time,
           '20-minute phone call', function () { renderInterviewPicker(null); }));
       }
@@ -2027,7 +2038,9 @@
         '<div class="wo-check">✓</div>' +
         '<h2>You’re all set!</h2>' +
         '<div class="wo-recap"></div>' +
-        '<p class="wo-recap-next">' + (BOOK_MODE === 'filming'
+        '<p class="wo-recap-next">' + (ONEOFF
+          ? 'A calendar invite is on its way to your inbox.'
+          : BOOK_MODE === 'filming'
           ? 'A calendar invite is on its way to your inbox. Everything locks in one week before filming.'
           : BOOK_MODE === 'interview'
           ? 'A calendar invite is on its way to your inbox. We’ll craft your script together at the interview.'
