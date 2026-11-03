@@ -6,15 +6,21 @@ and runs the widget, so each page only needs a single `<script>` tag.
 
 ## How it's deployed
 
-Served via jsDelivr from this repo. On each client page (Bricks → Settings →
-**Body footer scripts**) add one line:
+The Bricks footer (Bricks → Settings → Custom code → Body footer scripts) has one line:
 
 ```html
-<script src="https://cdn.jsdelivr.net/gh/WebOuts-Media/webouts-booking-widget@main/widget.js"></script>
+<script src="https://app.webouts.com/booking-widget.js"></script>
 ```
 
-That replaces both the old inline **Custom CSS** block and the **Body-footer JS**
-block. Nothing else in Bricks changes.
+That address is a Cloudflare Pages Function in the ClockUp repo
+(`ClockUp-Web/functions/booking-widget.js.js`). It reads `widget.js` from this
+repo's `main` branch (edge cache 60 s, browser cache 5 min) and falls back to
+jsDelivr `@main` if GitHub is down. Hospital networks can reach it because the
+widget already books through `app.webouts.com/api/book`.
+
+Do not go back to a GitHub-API loader or `@latest`: GitHub allows 60 lookups per
+hour per network, and `@latest` is the newest git tag, so hospital staff got an
+old wizard (2026-11-03).
 
 ## Per-page config stays in the page
 
@@ -28,11 +34,8 @@ So one `widget.js` serves every client; onboarding a client is just the page HTM
 
 ## Updating
 
-1. Edit `widget.js`, commit, push.
-2. Purge the CDN cache so it goes live immediately:
-   `curl https://purge.jsdelivr.net/gh/WebOuts-Media/webouts-booking-widget@main/widget.js`
-
-Pin to a commit or tag if you ever need to freeze a version.
+Edit `widget.js`, commit, push to `main`. Live on every page within about 5 minutes.
+No tags, purges or Bricks edits needed.
 
 ## Outage lock
 
