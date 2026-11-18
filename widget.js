@@ -53,7 +53,6 @@
     var WEBHOOK_FILMING = 'https://webouts.app.n8n.cloud/webhook/wo-filming-availability';
     var WEBHOOK_SCRIPTING = 'https://webouts.app.n8n.cloud/webhook/wo-scripting-availability';
     var WEBHOOK_BOOKING = 'https://webouts.app.n8n.cloud/webhook/wo-create-booking';
-    var WEBHOOK_CONFIG = 'https://webouts.app.n8n.cloud/webhook/booking-config';
 
     // ENGINE MODE (2026-10-15): pages moved off Calendly to WebOuts Scheduling.
     // On load the widget asks the engine whether this page has moved. Only a
@@ -114,38 +113,19 @@
     }
     applyLangVisibility();
 
-    // Resolve this page's Calendly links from the config service, keyed on the
-    // page slug (/orlando -> "orlando"). Calendly is the source of truth: the
-    // service returns only event types that are switched ON, so toggling the
-    // Spanish event in Calendly makes the language picker appear or disappear
-    // here with no code change and no page edit. Any failure (unknown slug,
-    // ok:false, network) leaves the hidden-input values untouched — and on a
-    // page that has no hidden inputs, locks the wizard (see “Wizard lock”).
+    // This page's slug (/orlando -> "orlando") keys the engine's config answer.
     var pageSlug = (location.pathname || '').replace(/^\/+|\/+$/g, '').split('/').pop().toLowerCase();
 
-    function fetchCalendlyConfig() {
-      return fetch(WEBHOOK_CONFIG + '?slug=' + encodeURIComponent(pageSlug))
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (d) {
-          if (!d || !d.ok || ENGINE_MODE) return;
-          CAL_1_URL = d.filming || CAL_1_URL;
-          CAL_2_URL = d.scripting || CAL_2_URL;
-          // Authoritative: '' means the bilingual event is off or absent.
-          CAL_1_BI_URL = d.bilingual || '';
-          applyLangVisibility();
-        })
-        .catch(function () { /* keep the hidden-input fallback */ });
-    }
-
+    // Engine only (v1.8.0): the n8n/Calendly config path is gone. Any answer
+    // other than provider:engine (not moved, unknown page, error, no answer
+    // within 4 s) pauses the page with the "Booking is busy" screen, which
+    // checks again on its own. Calendly is never used.
     function fetchConfig() {
       if (!pageSlug) return Promise.resolve();
       if (ENGINE_MODE && !engineBusy) return Promise.resolve();
-      // Both at once. The engine's answer wins, and never waits on n8n.
-      var cal = isMovedPage() ? null : Promise.race([fetchCalendlyConfig(), new Promise(function (resolve) { setTimeout(resolve, 6000); })]);
       return fetchEngineConfig().then(function (e) {
         if (e.state === 'engine') { engineBusy = false; useEngine(e.d); return; }
-        if (e.state === 'none' && isMovedPage()) { engineBusy = true; return; }
-        return cal || Promise.race([fetchCalendlyConfig(), new Promise(function (resolve) { setTimeout(resolve, 6000); })]);
+        engineBusy = true;
       });
     }
 
@@ -338,8 +318,6 @@
     //      page would render an empty box.
     //
     // Both re-check on the same timer, so the page unlocks by itself.
-    var CAL_STATUS_URL = 'https://calendlystatus.com/api/v2/summary.json';
-    var CAL_CORE = ['Calendly API', 'calendly.com', 'Notifications', 'Webhooks'];
     var calLocked = false;
     var configLocked = false;
 
@@ -415,21 +393,10 @@
       });
     }
 
-    function fetchCalendlyStatus() {
-      return fetch(CAL_STATUS_URL, { cache: 'no-store' })
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-          var comps = (d && d.components) || [];
-          return comps.some(function (c) {
-            return CAL_CORE.indexOf(c.name) !== -1 && c.status !== 'operational';
-          });
-        })
-        .catch(function () { return false; });   // fail open — never lock on a status-page hiccup
-    }
-
     function pollLock() {
       return Promise.all([
-        ENGINE_MODE ? Promise.resolve(false) : fetchCalendlyStatus(),
+        // v1.8.0: no Calendly status check; the engine is the only dependency.
+        Promise.resolve(false),
         // Retry the config service only while it's the thing that's broken, so
         // a healthy page doesn't re-poll n8n every minute for no reason.
         (configLocked || engineBusy) ? fetchConfig() : Promise.resolve()

@@ -41,6 +41,7 @@ function engineStub(url,body){var e=Q.get('engine');
      can:{reschedule_filming:true,reschedule_interview:ivx,book_interview:!ivx}});}
  if(url.indexOf('/compat/config')>-1){window.__log.push('ENGINE_CONFIG');
    if(e==='down')return new Promise(function(){});           // never answers
+   if(e==='notmoved')return J({ok:true,provider:'calendly',slug:'x'});
    return J({ok:true,provider:'engine',slug:'x',filming:'engine:x:filming',bilingual:'',scripting:'engine:x:interview'});}
  if(url.indexOf('/compat/engine/filming-availability')>-1){window.__log.push('ENGINE_FILMING');
    if(e==='availfail')return J({ok:false,reason:'availability_fetch_failed'});
@@ -63,7 +64,8 @@ window.fetch=function(url,opts){url=String(url);var body=(opts&&opts.body)||'';
  if(url.indexOf('wo-create-booking')>-1)window.__log.push('CALENDLY_PROXY_BOOK');
  if(url.indexOf('booking-config')>-1){window.__log.push('N8N_CONFIG');if(Q.get('engine')==='n8nhang')return new Promise(function(){});}
  if(url.indexOf('booking-config')>-1)return J({ok:true,filming:'https://calendly.com/x/f',bilingual:'',scripting:'https://calendly.com/x/s'});
- if(url.indexOf('calendlystatus')>-1)return J({components:[]});
+ if(url.indexOf('calendlystatus')>-1){window.__log.push('CAL_STATUS');return J({components:[]});}
+ if(url.indexOf('wo-filming-availability')>-1)window.__log.push('N8N_FILMING_AVAIL');
  if(url.indexOf('wo-filming-availability')>-1)return J({ok:true,event_type_uri:'https://api.calendly.com/event_types/F',custom_questions:[],bookedOutMonths:[],slots:[{start_time:f1,scheduling_url:'https://calendly.com/x/f/1'},{start_time:f2,scheduling_url:'https://calendly.com/x/f/2'}]});
  if(url.indexOf('wo-scripting-availability')>-1){window.__log.push('SCRIPTING_AVAIL');
    if(Q.get('ivslots')==='none')return J({ok:true,slots:[],no_slots:true,min_days:7});
@@ -108,7 +110,7 @@ window.addEventListener('load',function(){setTimeout(function(){
   waitFor('#wo-cal-1 .wo-slot-btn',function(b){b.click();waitFor('.wo-confirm-btn',function(c){c.click();setTimeout(finish,4000);});});
   return;
  }
- if(Q.get('engine')==='availfail'||Q.get('engine')==='availdown'||Q.get('moved')){setTimeout(finish,8000);return;}
+ if(Q.get('engine')==='notmoved'||Q.get('engine')==='down'||Q.get('engine')==='availfail'||Q.get('engine')==='availdown'||Q.get('moved')){setTimeout(finish,8000);return;}
  waitFor('#wo-cal-1 .wo-slot-btn',function(b){b.click();
   if(Q.get('ivslots')==='none'){setTimeout(finish,4000);return;}
   waitFor('#wo-cal-2 .wo-slot-btn',function(b2){b2.click();
